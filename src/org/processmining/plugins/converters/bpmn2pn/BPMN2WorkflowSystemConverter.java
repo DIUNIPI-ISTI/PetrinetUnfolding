@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -17,6 +18,7 @@ import org.processmining.models.graphbased.directed.bpmn.BPMNNode;
 import org.processmining.models.graphbased.directed.bpmn.elements.Activity;
 import org.processmining.models.graphbased.directed.bpmn.elements.Event;
 import org.processmining.models.graphbased.directed.bpmn.elements.Event.EventTrigger;
+import org.processmining.models.graphbased.directed.bpmn.elements.Event.EventType;
 import org.processmining.models.graphbased.directed.bpmn.elements.Flow;
 import org.processmining.models.graphbased.directed.bpmn.elements.Gateway;
 import org.processmining.models.graphbased.directed.bpmn.elements.Gateway.GatewayType;
@@ -83,6 +85,9 @@ public class BPMN2WorkflowSystemConverter
 
 	public boolean convert(PluginContext context) 
 	{
+		try{
+		errors.addAll( checkDefect());
+		
 		/* Traslate BPMN to Petri net */
 		translateEdges();
 		translateMessageFlows();
@@ -91,8 +96,142 @@ public class BPMN2WorkflowSystemConverter
 		translateSubProcesses();
 		translateGateways();
 		translateWorkflowSystem(context);
+		
 
 		return errors.size() == 0;
+		
+		}catch (Exception e) {
+		//	context.log(e);
+			errors.add(e.getMessage());
+			return errors.size() == 0;
+		}/**/
+	}
+
+	private Collection<String> checkDefect()  {
+		Collection<String> maperror = new ArrayList<String>();
+		pathFromStartToEnd(bpmn,maperror );
+		return maperror;
+		
+	}
+	
+	private void pathFromStartToEnd(BPMNDiagram bpmn,
+			Collection<String> maperror) {
+		// every object is on a path from a start event or an exception event to
+		// an end event
+		for (BPMNNode a : bpmn.getNodes()) {
+			List<BPMNNode> listnodeatttoend = new LinkedList<BPMNNode>();
+			List<BPMNNode> listnodeatttostart = new LinkedList<BPMNNode>();
+			if (!(a instanceof Swimlane)) {
+				if ((a instanceof Gateway) | (a instanceof Activity) | (a instanceof Event)) {
+				pathFromNodeToEnd(a, maperror, a, listnodeatttoend);
+				pathFromNodeToStart(a, maperror, a, listnodeatttostart);
+				}
+			}
+
+		}
+
+	}
+
+	private void pathFromNodeToStart(BPMNNode a, Collection<String> maperror,
+			BPMNNode c, List<BPMNNode> listnodeatttostart) {
+		if (!listnodeatttostart.contains(a)) {
+			Collection<BPMNEdge<? extends BPMNNode, ? extends BPMNNode>> edges = a
+					.getGraph().getInEdges(a);
+			if (!edges.isEmpty()) {
+				for (BPMNEdge<? extends BPMNNode, ? extends BPMNNode> edge : edges) {
+					BPMNNode b = edge.getSource();
+					if (b instanceof Event) {
+						Event isend = (Event) b;
+					/*	if (isend.getEventTrigger() == null) {
+							isend.setEventTrigger(EventTrigger.NONE);
+						}*/
+						if ((isend.getEventType() == EventType.START /*&& isend
+								.getEventTrigger() == EventTrigger.NONE)
+								|| (isend.getEventType() == EventType.INTERMEDIATE && isend
+								.getEventTrigger() == EventTrigger.ERROR*/)) {
+							listnodeatttostart.add(a);
+							
+							break;
+						}
+					}
+					if (b == null) {
+						maperror.add("The path of element [[" + c.getLabel()+",ID: "+c.getId()
+								+ "]] don't contain start event element");
+					}
+					listnodeatttostart.add(a);
+					pathFromNodeToStart(b, maperror, c, listnodeatttostart); // /vero??
+				}
+
+			} else {
+				if (a instanceof Event) {
+					Event isstart = (Event) a;
+					/*if (isstart.getEventTrigger() == null) {
+						isstart.setEventTrigger(EventTrigger.NONE);
+					}*/
+					if (isstart.getEventType() != EventType.START
+							/*&& isstart.getEventTrigger() != EventTrigger.NONE*/) {
+						maperror.add("The path of element [[" + c.getLabel()+",ID: "+c.getId()
+								+ "]] don't contain start event  element");
+					}else{
+						listnodeatttostart.add(a);
+					}
+				} else
+					maperror.add("The path of element [[" + c.getLabel()+",ID: "+c.getId()
+							+ "]] don't contain start event element");
+
+			}
+		}
+
+	}
+
+	private void pathFromNodeToEnd(BPMNNode a, Collection<String> maperror,
+			BPMNNode c, List<BPMNNode> listnodeatt) {
+		if (!listnodeatt.contains(a)) {
+			Collection<BPMNEdge<? extends BPMNNode, ? extends BPMNNode>> edges = a
+					.getGraph().getOutEdges(a);
+			if (!edges.isEmpty()) {
+				for (BPMNEdge<? extends BPMNNode, ? extends BPMNNode> edge : edges) {
+					BPMNNode b = edge.getTarget();
+					if (b instanceof Event) {
+						Event isend = (Event) b;
+					/*	if (isend.getEventTrigger() == null) {
+							isend.setEventTrigger(EventTrigger.NONE);
+						}*/
+						if (isend.getEventType() == EventType.END
+								/*&& isend.getEventTrigger() == EventTrigger.NONE*/) {
+							listnodeatt.add(a);
+							listnodeatt.add(c);
+							break;
+						}
+					}
+					if (b == null) {
+						maperror.add("The path of element [[" + c.getLabel()+",ID: "+c.getId()
+								+ "]] don't contain end event element");
+					}
+					listnodeatt.add(a);
+					pathFromNodeToEnd(b, maperror, c, listnodeatt);
+				}
+			} else {
+				if (a instanceof Event) {
+					Event isend = (Event) a;
+					/*if (isend.getEventTrigger() == null) {
+						isend.setEventTrigger(EventTrigger.NONE);
+					}*/
+					if (isend.getEventType() != EventType.END
+						/*	&& isend.getEventTrigger() != EventTrigger.NONE*/) {
+						maperror.add("The path of element [[" + c.getLabel()+",ID: "+c.getId()
+								+ "]] don't contain end event element");
+					}else{
+						listnodeatt.add(a);
+						listnodeatt.add(c);
+					}
+				} else
+					maperror.add("The path of element [[" + c.getLabel()+",ID: "+c.getId()
+							+ "]] don't contain end event element");
+
+			}
+		}
+
 	}
 
 	/**
@@ -116,10 +255,20 @@ public class BPMN2WorkflowSystemConverter
 	{
 		for (MessageFlow f : bpmn.getMessageFlows()) 
 		{
+			BPMNNode source = f.getSource();
+			BPMNNode target = f.getTarget();
+			if(((source instanceof Event)&(target instanceof Activity))|
+					((source instanceof Activity)&(target instanceof Event))|
+					((source instanceof Activity)&(target instanceof Activity))|
+					((source instanceof Event)&(target instanceof Event))
+					){
 			Place p = net.addPlace("interface_" + f.getSource().getLabel()+"_"+f.getTarget().getLabel()+"_"+f.getLabel());
 			p.getAttributeMap().put("Original id", f.getAttributeMap().get("Original id"));
 			flowMapPNtoBP.put(new EPetrinetNode(p),f);
 			flowMap.put(f, p);
+			}else{
+				System.out.println(f);
+			}
 		}
 	}	
 
@@ -162,16 +311,29 @@ public class BPMN2WorkflowSystemConverter
 		reverseMap.put(new EPetrinetNode(t), e);
 		net.addArc(p, t);
 
+		if(e.getParentPool()!=null){
 		/* Save each pool its input */
 		if(e.getGraph().getInEdges(e).isEmpty()){
-			startEventMap.get(e.getParentPool().getId()).add(p);
+			if(startEventMap.containsKey(e.getParentPool().getId())){
+				startEventMap.get(e.getParentPool().getId()).add(p);
+			}else{
+				startEventMap.put(e.getParentPool().getId(), new ArrayList <Place>());
+				startEventMap.get(e.getParentPool().getId()).add(p);
+			}
 		}else{
 			startEventMap.remove(e.getParentPool().getId());
 			net.removeArc(p, t);
 			net.removePlace(p);
 
 		}
-
+		}else{
+			
+				NodeID ids = new NodeID();
+				startEventMap.put(ids, new ArrayList <Place>());
+				startEventMap.get(ids).add(p);
+				
+			
+		}
 		// Connect transition to place of outgoing edge
 		for (BPMNEdge<?, ?> f : bpmn.getOutEdges(e)) 
 		{
@@ -181,6 +343,7 @@ public class BPMN2WorkflowSystemConverter
 			}
 			if (f instanceof MessageFlow) 
 			{
+				if(flowMap.containsKey(f))
 				net.addArc(t, flowMap.get(f));
 			}
 		}
@@ -193,7 +356,7 @@ public class BPMN2WorkflowSystemConverter
 				net.addArc(flowMap.get(f), t);
 			}
 			if (f instanceof MessageFlow) 
-			{
+			{	if(flowMap.containsKey(f))
 				net.addArc(flowMap.get(f), t);
 			}
 		}
@@ -217,15 +380,28 @@ public class BPMN2WorkflowSystemConverter
 		//endEventMap.get(e.getParentPool().getId()).add(p);
 		
 		/* Save each pool its input */
+		if(e.getParentPool()!=null){
 		if(e.getGraph().getOutEdges(e).isEmpty()){
-			endEventMap.get(e.getParentPool().getId()).add(p);
+			if(endEventMap.containsKey(e.getParentPool().getId())){
+				endEventMap.get(e.getParentPool().getId()).add(p);
+			}else{
+				endEventMap.put(e.getParentPool().getId(), new ArrayList <Place>());
+				endEventMap.get(e.getParentPool().getId()).add(p);
+			}
 		}else{
 			endEventMap.remove(e.getParentPool().getId());
 			net.removeArc(p, t);
 			net.removePlace(p);
 
 		}
-
+		}else{
+			
+			NodeID ids = new NodeID();
+			endEventMap.put(ids, new ArrayList <Place>());
+			endEventMap.get(ids).add(p);
+			
+		
+		}
 		// Connect transition to place of outgoing edge
 		for (BPMNEdge<?, ?> f : bpmn.getOutEdges(e)) 
 		{
@@ -235,6 +411,7 @@ public class BPMN2WorkflowSystemConverter
 			}
 			if (f instanceof MessageFlow) 
 			{
+				if(flowMap.containsKey(f))
 				net.addArc(t, flowMap.get(f));
 			}
 		}
@@ -248,6 +425,7 @@ public class BPMN2WorkflowSystemConverter
 			}
 			if (f instanceof MessageFlow) 
 			{
+				if(flowMap.containsKey(f))
 				net.addArc(flowMap.get(f), t);
 			}
 		}
@@ -277,6 +455,7 @@ public class BPMN2WorkflowSystemConverter
 			}
 			if (f instanceof MessageFlow) 
 			{
+				if(flowMap.containsKey(f))
 				net.addArc(t, flowMap.get(f));
 			}
 		}
@@ -290,6 +469,7 @@ public class BPMN2WorkflowSystemConverter
 			}
 			if (f instanceof MessageFlow) 
 			{
+				if(flowMap.containsKey(f))
 				net.addArc(flowMap.get(f), t);
 			}
 		}
@@ -438,6 +618,7 @@ public class BPMN2WorkflowSystemConverter
 			}
 			if (f instanceof MessageFlow) 
 			{
+				if(flowMap.containsKey(f))
 				net.addArc(flowMap.get(f), t_start);
 			}
 		}
@@ -451,6 +632,7 @@ public class BPMN2WorkflowSystemConverter
 			}
 			if (f instanceof MessageFlow) 
 			{
+				if(flowMap.containsKey(f))
 				net.addArc(t_end, flowMap.get(f));
 			}
 		}
